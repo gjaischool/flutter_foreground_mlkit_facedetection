@@ -2,15 +2,54 @@
 
 A new Flutter project.
 
-## Getting Started
 
-This project is a starting point for a Flutter application.
 
-A few resources to get you started if this is your first Flutter project:
+1. 앱 시작 및 초기화
+    main() → MyApp → FaceDetectorView → _FaceDetectorViewState.initState()
+        main()에서 가장 먼저 실행되는 작업:
+            WidgetsFlutterBinding.ensureInitialized(): Flutter 엔진 초기화
+            FlutterForegroundTask.init(): 포그라운드 서비스 설정 초기화
+            FlutterForegroundTask.initCommunicationPort(): UI와 서비스 간 통신 채널 설정
+        FaceDetectorView 생성 시:
+            _initializeServices() 호출
+            _initializeVolume() 호출
+            _initializeServiceCommunication() 호출
 
-- [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
+2. 권한 요청 프로세스
+    _initializeServices() → _requestPermissionsSequentially()
+    필요한 권한들: 카메라 권한, 오디오 권한, 알림 권한, 시스템 오버레이 권한, 배터리 최적화 제외 권한
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+3. 포그라운드 서비스 시작
+    _initializeForegroundService() → FlutterForegroundTask.startService() → startCallback() → SleepDetectionHandler
+
+        서비스 시작 시:
+            startCallback()이 새로운 isolate에서 실행됨
+            SleepDetectionHandler 인스턴스 생성
+            onStart() 메서드 호출
+        SleepDetectionHandler 상태:
+            _isServiceRunning: 서비스 실행 상태
+            _isDrowsinessDetected: 졸음 감지 상태
+            _lastAlertTime: 마지막 알림 시간
+
+4. UI와 서비스 간 통신 설정
+    _initializeServiceCommunication() → FlutterForegroundTask.addTaskDataCallback()
+        양방향 통신:
+            UI → 서비스: FlutterForegroundTask.sendDataToTask()
+            서비스 → UI: FlutterForegroundTask.sendDataToMain()
+
+5. 졸음 감지 프로세스
+    CameraView._processImage() → _FaceDetectorViewState._processImage() → _detectDrowsiness() → _showOverlay()/_triggerAlert()
+        졸음 감지 시:
+            _showOverlay(true) 호출
+            UI에 상태 표시
+            서비스에 상태 전달 (sendDataToTask)
+        서비스에서 알림 트리거:
+            onRepeatEvent()에서 상태 체크
+            조건 만족 시 UI에 알림 요청 (sendDataToMain)
+
+6. 알림 처리
+    SleepDetectionHandler.onRepeatEvent() → UI._triggerAlert() → _triggerAlarm() + _triggerVibration()
+        서비스에서 UI로 알림 요청 시:
+            시간대 확인 (주간/야간)
+            알림 간격 확인
+            볼륨, 진동, 알람 처리

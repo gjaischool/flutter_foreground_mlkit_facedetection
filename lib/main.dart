@@ -10,8 +10,8 @@ import 'package:permission_handler/permission_handler.dart'; // 플랫폼 서비
 import 'package:haptic_feedback/haptic_feedback.dart';
 import 'package:volume_controller/volume_controller.dart';
 
-/// Flutter 앱의 백그라운드 실행을 위한 진입점 설정
-/// @pragma('vm:entry-point')는 Dart VM에게 이 함수를 진입점으로 표시
+/// Flutter 앱이 백그라운드에서도 실행될 수 있도록 하는 진입점
+/// 새로운 isolate에서 실행되므로 @pragma('vm:entry-point') 필요
 ///
 /// 이 어노테이션이 필요한 이유:
 /// 1. Flutter 앱이 백그라운드에서 실행될 때, 메인 isolate와 별개의 새로운 isolate가 생성됨
@@ -21,8 +21,8 @@ import 'package:volume_controller/volume_controller.dart';
 void startCallback() {
   debugPrint('Starting Sleep Detection Service...');
 
-  // SleepDetectionHandler를 포그라운드 작업의 핸들러로 설정
-  // 이를 통해 백그라운드에서 실행될 작업들을 관리
+  // 포그라운드 서비스용 핸들러 설정
+  // 이 핸들러는 별도의 isolate에서 실행됨
   FlutterForegroundTask.setTaskHandler(SleepDetectionHandler());
 }
 
@@ -37,6 +37,26 @@ void main() async {
   /// 3. 특히 main() 함수가 async일 때 필수적
   /// 4. SharedPreferences, 카메라, 파일 시스템 등의 플랫폼 서비스 사용 전에 호출되어야 함
   WidgetsFlutterBinding.ensureInitialized();
+
+  /// 포그라운드 서비스 기본 설정
+  FlutterForegroundTask.init(
+    androidNotificationOptions: AndroidNotificationOptions(
+      channelId: 'sleep_detection',
+      channelName: '졸음 감지 서비스',
+      channelDescription: '졸음 감지 서비스가 실행 중입니다.',
+      visibility: NotificationVisibility.VISIBILITY_PUBLIC,
+      onlyAlertOnce: true,
+    ),
+    iosNotificationOptions: const IOSNotificationOptions(
+      showNotification: true,
+      playSound: true,
+    ),
+    foregroundTaskOptions: ForegroundTaskOptions(
+      eventAction: ForegroundTaskEventAction.nothing(),
+      autoRunOnBoot: true,
+      allowWakeLock: true,
+    ),
+  );
 
   /// 포그라운드 서비스를 위한 통신 포트 초기화
   ///
@@ -66,20 +86,71 @@ class MyApp extends StatelessWidget {
 /// 졸음 감지 서비스 핸들러 클래스
 /// 백그라운드에서 실행되는 작업을 관리
 class SleepDetectionHandler extends TaskHandler {
+  // 상태 관리 변수
+  bool _isServiceRunning = false;
+  bool _isDrowsinessDetected = false;
+  DateTime? _lastAlertTime;
+  // 설정값
+  static const int _defaultAlertInterval = 3; // 기본 알림 간격(초)
+  static const int _nightAlertInterval = 2; // 야간 알림 간격(초)
+
   /// 서비스가 시작될 때 호출되는 메서드
   /// @param timestamp - 서비스 시작 시간
   /// @param starter - 서비스 시작 제어 객체
   @override
   Future<void> onStart(DateTime timestamp, TaskStarter starter) async {
     // 서비스 시작 시 필요한 초기화 작업 수행
+    debugPrint('Sleep Detection Service Started at: $timestamp');
+    _isServiceRunning = true;
+
+    // 볼륨 최대화 및 서비스 시작 알림
+    try {
+      // 서비스 시작 시 볼륨 최대화
+      VolumeController().maxVolume();
+      debugPrint('Volume maximized');
+
+      // UI에 서비스 시작 알림
+      FlutterForegroundTask.sendDataToMain({
+        'action': 'service_started',
+        'timestamp': timestamp.toIso8601String(),
+      });
+    } catch (e) {
+      debugPrint('Service initialization error: $e');
+    }
   }
 
   /// 주기적으로 실행되는 이벤트 핸들러
   /// @param timestamp - 현재 이벤트 발생 시간
+  ///  졸음 상태 체크 및 알림 발생 여부 결정
   @override
   void onRepeatEvent(DateTime timestamp) {
     // 주기적으로 실행해야 하는 작업 수행
-    // 예: 졸음 감지 상태 체크, 데이터 동기화 등
+    if (!_isServiceRunning) return;
+
+    try {
+      final isNightTime = timestamp.hour >= 22 || timestamp.hour <= 5;
+
+      // 졸음이 감지된 경우 알림 발생 여부 체크
+      if (_isDrowsinessDetected) {
+        final alertInterval =
+            isNightTime ? _nightAlertInterval : _defaultAlertInterval;
+
+        // 마지막 알림으로부터 일정 시간이 지났는지 확인
+        if (_lastAlertTime == null ||
+            timestamp.difference(_lastAlertTime!).inSeconds >= alertInterval) {
+          // UI에 알림 요청
+          FlutterForegroundTask.sendDataToMain({
+            'action': 'trigger_alert',
+            'isNightTime': isNightTime,
+            'timestamp': timestamp.toIso8601String(),
+          });
+          _lastAlertTime = timestamp;
+          debugPrint('Alert triggered at: $timestamp');
+        }
+      }
+    } catch (e) {
+      debugPrint('Repeat event error: $e');
+    }
   }
 
   /// 서비스가 종료될 때 호출되는 메서드
@@ -87,15 +158,51 @@ class SleepDetectionHandler extends TaskHandler {
   @override
   Future<void> onDestroy(DateTime timestamp) async {
     // 서비스 종료 시 필요한 정리 작업 수행
-    // 예: 리소스 해제, 상태 저장 등
+    debugPrint('Sleep Detection Service Stopped at: $timestamp');
+    _isServiceRunning = false;
+
+    try {
+      // 서비스 종료 시 알림 중지 요청
+      FlutterForegroundTask.sendDataToMain({
+        'action': 'stop_alert',
+        'timestamp': timestamp.toIso8601String(),
+      });
+
+      // 상태 초기화
+      _isDrowsinessDetected = false;
+      _lastAlertTime = null;
+    } catch (e) {
+      debugPrint('Service cleanup error: $e');
+    }
   }
 
-  /// 메인 앱으로부터 데이터를 수신할 때 호출되는 메서드
+  /// UI로부터 데이터 수신 시 호출
+  /// 졸음 상태 업데이트 등 처리
   /// @param data - 수신된 데이터 객체
   @override
   void onReceiveData(Object? data) {
     // 메인 앱으로부터 받은 데이터 처리
-    // 예: 설정 변경, 상태 업데이트 등
+    if (data is Map) {
+      try {
+        switch (data['action']) {
+          case 'update_drowsiness_state':
+            // UI에서 감지된 졸음 상태 업데이트
+            _isDrowsinessDetected = data['isDrowsy'] as bool;
+            debugPrint('Drowsiness state updated: $_isDrowsinessDetected');
+            break;
+
+          case 'update_settings':
+            // 추가 설정 업데이트 처리
+            debugPrint('Settings updated: $data');
+            break;
+
+          default:
+            debugPrint('Unknown action received: ${data['action']}');
+        }
+      } catch (e) {
+        debugPrint('Data processing error: $e');
+      }
+    }
   }
 }
 
@@ -134,12 +241,48 @@ class _FaceDetectorViewState extends State<FaceDetectorView> {
   DateTime? _lastAlertTime; // 마지막 알림 시간
   bool _isVibratingPlaying = false; // 진동 상태
 
+  void Function(Object)? _taskCallback; // 콜백 참조 저장용 변수
+
   /// 위젯 초기화 함수
   @override
   void initState() {
     super.initState();
     _initializeServices(); // 서비스 초기화
     _initializeVolume(); // 볼륨 초기화
+    _initializeServiceCommunication();
+  }
+
+  /// UI와 서비스 간 통신 초기화
+  void _initializeServiceCommunication() {
+    // 서비스로부터 메시지 수신을 위한 콜백 설정
+    _taskCallback = (Object data) {
+      if (data is Map) {
+        try {
+          switch (data['action']) {
+            case 'service_started':
+              // 서비스 시작 알림 처리
+              debugPrint('Service started at: ${data['timestamp']}');
+              break;
+
+            case 'trigger_alert':
+              // 알림 요청 처리
+              final isNightTime = data['isNightTime'] as bool;
+              _triggerAlert(isNightTime);
+              break;
+
+            case 'stop_alert':
+              // 알림 중지 요청 처리
+              _resetState();
+              break;
+          }
+        } catch (e) {
+          debugPrint('Error processing service message: $e');
+        }
+      }
+    };
+
+    // 저장된 콜백 함수 등록
+    FlutterForegroundTask.addTaskDataCallback(_taskCallback!);
   }
 
   /// 볼륨 초기화 함수.
@@ -281,26 +424,6 @@ class _FaceDetectorViewState extends State<FaceDetectorView> {
   /// 포그라운드 서비스 초기화 함수.
   /// 백그라운드에서 앱이 실행될 수 있도록 서비스 설정
   Future<void> _initializeForegroundService() async {
-    // 포그라운드 서비스 기본 설정
-    FlutterForegroundTask.init(
-      androidNotificationOptions: AndroidNotificationOptions(
-        channelId: 'sleep_detection',
-        channelName: '졸음 감지 서비스',
-        channelDescription: '졸음 감지 서비스가 실행 중입니다.',
-        visibility: NotificationVisibility.VISIBILITY_PUBLIC,
-        onlyAlertOnce: true,
-      ),
-      iosNotificationOptions: const IOSNotificationOptions(
-        showNotification: true,
-        playSound: true,
-      ),
-      foregroundTaskOptions: ForegroundTaskOptions(
-        eventAction: ForegroundTaskEventAction.nothing(),
-        autoRunOnBoot: true, // 부팅 시 자동 실행
-        allowWakeLock: true, // 화면 꺼짐 방지
-      ),
-    );
-
     // 서비스가 실행 중이 아닐 경우에만 시작
     if (!(await FlutterForegroundTask.isRunningService)) {
       await FlutterForegroundTask.startService(
@@ -374,6 +497,11 @@ class _FaceDetectorViewState extends State<FaceDetectorView> {
   /// 졸음 감지 상태에 따라 오버레이 업데이트
   void _showOverlay(bool isSleeping) {
     _isSleepingNotifier.value = isSleeping;
+    // 포그라운드 서비스에 상태 업데이트 전송
+    FlutterForegroundTask.sendDataToTask({
+      'action': 'update_drowsiness_state',
+      'isDrowsy': isSleeping,
+    });
   }
 
   /// 이미지 처리 함수.
@@ -423,6 +551,7 @@ class _FaceDetectorViewState extends State<FaceDetectorView> {
 
       // 연속된 프레임 동안 눈을 감고 있는 경우
       if (_closedEyeFrameCount >= _drowsinessFrameThreshold) {
+        _showOverlay(true); // 서비스에 상태 업데이트
         // 마지막 알림으로부터 일정 시간이 지난 경우에만 알림 발생
         if (_lastAlertTime == null ||
             now.difference(_lastAlertTime!).inSeconds >= _alertInterval) {
@@ -541,6 +670,11 @@ class _FaceDetectorViewState extends State<FaceDetectorView> {
     _overlayEntry?.remove(); // 오버레이 제거
     _stopVibration(); // 진동 중지
     VolumeController().removeListener(); // 볼륨 컨트롤러 리스너 제거
+    // 저장된 콜백 함수 제거
+    if (_taskCallback != null) {
+      FlutterForegroundTask.removeTaskDataCallback(_taskCallback!);
+      _taskCallback = null;
+    }
     super.dispose();
   }
 
