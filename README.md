@@ -4,6 +4,29 @@ A new Flutter project.
 
 
 
+1. 앱 실행 초기 순서:
+    main() → 권한 요청 → 포그라운드 서비스 시작 → 카메라 초기화
+2. 포그라운드 서비스 시작:
+    startCallback() → SleepDetectionHandler 생성
+        - onStart(): 서비스 시작 초기화
+3. 반복적으로 실행되는 핵심 부분:
+    // 1. 카메라 스트림에서 지속적으로 이미지 캡처
+        CameraView._processImage()
+        ↓
+    // 2. 얼굴 감지 및 눈 상태 분석
+        _FaceDetectorViewState._processImage()
+        ↓
+    // 3. 졸음 상태 확인
+        _detectDrowsiness()
+        ↓
+    // 4. 졸음 감지시:
+        _showOverlay(true) 
+            → FlutterForegroundTask.sendDataToTask() // UI에서 서비스로 상태 전송
+            → SleepDetectionHandler.onRepeatEvent() // 서비스에서 주기적으로 상태 체크
+            → FlutterForegroundTask.sendDataToMain() // 서비스에서 UI로 알림 요청
+            → _triggerAlert() // 알람/진동 실행
+
+//----------------------------------------------------------------------------------------
 1. 앱 시작 및 초기화
     main() → MyApp → FaceDetectorView → _FaceDetectorViewState.initState()
         main()에서 가장 먼저 실행되는 작업:
@@ -21,7 +44,6 @@ A new Flutter project.
 
 3. 포그라운드 서비스 시작
     _initializeForegroundService() → FlutterForegroundTask.startService() → startCallback() → SleepDetectionHandler
-
         서비스 시작 시:
             startCallback()이 새로운 isolate에서 실행됨
             SleepDetectionHandler 인스턴스 생성
