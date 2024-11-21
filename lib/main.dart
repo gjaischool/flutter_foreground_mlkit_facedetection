@@ -103,12 +103,8 @@ class SleepDetectionHandler extends TaskHandler {
     debugPrint('Sleep Detection Service Started at: $timestamp');
     _isServiceRunning = true;
 
-    // 볼륨 최대화 및 서비스 시작 알림
+    // 서비스 시작 알림
     try {
-      // 서비스 시작 시 볼륨 최대화
-      VolumeController().maxVolume();
-      debugPrint('Volume maximized');
-
       // UI에 서비스 시작 알림
       FlutterForegroundTask.sendDataToMain({
         'action': 'service_started',
@@ -240,6 +236,7 @@ class _FaceDetectorViewState extends State<FaceDetectorView> {
   static const int _alertInterval = 3; // 알림 간격(초)
   DateTime? _lastAlertTime; // 마지막 알림 시간
   bool _isVibratingPlaying = false; // 진동 상태
+  late double _originalVolume; // 원래 볼륨을 저장할 변수
 
   void Function(Object)? _taskCallback; // 콜백 참조 저장용 변수
 
@@ -286,11 +283,10 @@ class _FaceDetectorViewState extends State<FaceDetectorView> {
   }
 
   /// 볼륨 초기화 함수.
-  /// 시스템 볼륨을 최대로 설정하고 볼륨 변경 리스너 설정
+  /// 볼륨 변경 리스너 설정
   Future<void> _initializeVolume() async {
     try {
       VolumeController().showSystemUI = false; // 시스템 UI 표시 여부 설정
-      VolumeController().maxVolume(); // 볼륨을 최대로 설정
 
       // 볼륨 변경 이벤트 리스너 설정
       // 시스템 볼륨이 변경될 때마다 로그 출력
@@ -397,17 +393,6 @@ class _FaceDetectorViewState extends State<FaceDetectorView> {
           await Future.delayed(const Duration(milliseconds: 500));
         }
       }
-
-      // 오디오 설정 권한 요청 추가
-      // final audioStatus = await Permission.audio.request();
-      // if (audioStatus.isDenied) {
-      //   throw Exception('Audio settings permission denied');
-      // }
-
-      // final cameraStatus = await Permission.camera.request();
-      // if (cameraStatus.isDenied) {
-      //   throw Exception('Camera permission denied');
-      // }
 
       // 모든 권한이 허용되었는지 최종 확인
       if (await FlutterForegroundTask.checkNotificationPermission() !=
@@ -579,6 +564,11 @@ class _FaceDetectorViewState extends State<FaceDetectorView> {
     _showOverlay(true); // 졸음 감지 상태 표시
 
     try {
+      // 현재 볼륨 저장
+      VolumeController().getVolume().then((volume) {
+        _originalVolume = volume;
+      });
+
       // 야간에는 더 큰 볼륨으로 알림
       final volume = isNightTime ? 1.0 : 0.7;
       VolumeController().setVolume(volume, showSystemUI: false);
@@ -589,23 +579,15 @@ class _FaceDetectorViewState extends State<FaceDetectorView> {
       // 알람과 진동 시작
       await _triggerAlarm();
       _triggerVibration();
+
+      // 진동과 알람을 동시에 실행
+      // await Future.wait([
+      //   _triggerVibration(),
+      //   _triggerAlarm(),
+      // ]);
     } catch (e) {
       debugPrint('알림 트리거 에러: $e');
     }
-    //밤시간대는 더 큰 소리로 알림
-    // 볼륨 설정
-    // try {
-    //   final volume = isNightTime ? 1.0 : 0.7;
-    //   await _audioPlayer.setVolume(volume);
-
-    //   // 진동과 알람을 동시에 실행
-    //   await Future.wait([
-    //     _triggerVibration(),
-    //     _triggerAlarm(),
-    //   ]);
-    // } catch (e) {
-    //   debugPrint('알림 트리거 에러: $e');
-    // }
   }
 
   /// 진동 실행 함수.
@@ -653,6 +635,11 @@ class _FaceDetectorViewState extends State<FaceDetectorView> {
       try {
         _isAlarmPlaying = false;
         await _audioPlayer.stop(); // 오디오 재생 중지
+        // 원래 볼륨으로 복구
+        VolumeController().setVolume(_originalVolume, showSystemUI: false);
+
+        // 볼륨 설정이 적용되도록 짧은 딜레이 추가
+        await Future.delayed(const Duration(milliseconds: 100));
       } catch (e) {
         debugPrint('알람 중지 에러: $e');
       }
@@ -669,6 +656,9 @@ class _FaceDetectorViewState extends State<FaceDetectorView> {
     _audioPlayer.dispose(); // 오디오 플레이어 해제
     _overlayEntry?.remove(); // 오버레이 제거
     _stopVibration(); // 진동 중지
+
+    VolumeController()
+        .setVolume(_originalVolume, showSystemUI: false); // 볼륨을 원래대로 복구
     VolumeController().removeListener(); // 볼륨 컨트롤러 리스너 제거
     // 저장된 콜백 함수 제거
     if (_taskCallback != null) {
