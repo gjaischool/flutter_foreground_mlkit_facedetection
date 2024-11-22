@@ -1,6 +1,6 @@
 # foreground_mlkit_camera
 
-A new Flutter project.
+앱이 종료되어도 계속해서 졸음 감지를 수행
 
 
 

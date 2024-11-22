@@ -22,6 +22,7 @@ dependencies:
   path: ^1.9.0
   path_provider: ^2.1.4
   audioplayers: ^6.1.0
+  volume_controller: ^2.0.8
   haptic_feedback: ^0.5.1+1
   google_mlkit_commons: any
   google_mlkit_face_detection:
@@ -32,7 +33,7 @@ dependencies:
   flutter_overlay_window: ^0.4.5
   permission_handler: ^11.3.1
   flutter_local_notifications: ^18.0.1
-  volume_controller: ^2.0.8
+
 
 dependency_overrides:
   google_mlkit_commons:

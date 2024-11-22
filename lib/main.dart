@@ -10,6 +10,71 @@ import 'package:permission_handler/permission_handler.dart'; // 플랫폼 서비
 import 'package:haptic_feedback/haptic_feedback.dart';
 import 'package:volume_controller/volume_controller.dart';
 
+// 상수 분리
+class AppConstants {
+  // 크기 관련 상수
+  static const overlayPadding = 12.0;
+  static const overlayBorderRadius = 20.0;
+  static const overlayTextSize = 14.0;
+  static const overlayInitialPosition = Offset(20, 100);
+
+  // 졸음 감지 관련 상수
+  static const closedEyeThreshold = 0.5;
+  static const drowsinessFrameThreshold = 8;
+  static const defaultAlertInterval = 3;
+  static const nightAlertInterval = 2; // 밤에는 좀더 간격 작게
+  static const nightTimeStartHour = 22;
+  static const nightTimeEndHour = 5;
+
+  // 진동 및 알람 관련 상수
+  static const vibrationInterval = Duration(milliseconds: 100);
+  static const volumeChangeDelay = Duration(milliseconds: 100);
+  static const dayTimeVolume = 0.7;
+  static const nightTimeVolume = 1.0;
+
+  // 초기화 관련 상수
+  static const initializationDelay = Duration(milliseconds: 100);
+  static const permissionCheckDelay = Duration(milliseconds: 500);
+
+  // 카메라 관련 상수
+  static const cameraResolution = ResolutionPreset.low;
+}
+
+// 공통으로 사용되는 스타일
+class AppStyles {
+  // 오버레이 컨테이너 스타일
+  static BoxDecoration overlayDecoration(bool isSleeping) => BoxDecoration(
+        color: isSleeping
+            ? Colors.red.withOpacity(0.9)
+            : Colors.blue.withOpacity(0.9),
+        borderRadius: BorderRadius.circular(AppConstants.overlayBorderRadius),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.2),
+            blurRadius: 4,
+          ),
+        ],
+      );
+
+  // 오버레이 텍스트 스타일
+  static const overlayTextStyle = TextStyle(
+    color: Colors.white,
+    fontSize: AppConstants.overlayTextSize,
+    fontWeight: FontWeight.bold,
+    decoration: TextDecoration.none,
+  );
+
+  // 알림 다이얼로그 스타일
+  static const dialogTitleStyle = TextStyle(
+    fontWeight: FontWeight.bold,
+  );
+
+  // 버튼 스타일
+  static final dialogButtonStyle = TextButton.styleFrom(
+    foregroundColor: Colors.blue,
+  );
+}
+
 /// Flutter 앱이 백그라운드에서도 실행될 수 있도록 하는 진입점
 /// 새로운 isolate에서 실행되므로 @pragma('vm:entry-point') 필요
 ///
@@ -73,7 +138,10 @@ void main() async {
 /// MaterialApp을 구성하고 메인 화면을 설정
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
-
+  // MyApp 클래스는 매우 단순해 보이지만
+  // WithForegroundTask 위젯을 사용하기 위해 필요
+  // WithForegroundTask 위젯은 앱이 백그라운드로 전환될 때도
+  //포그라운드 서비스가 계속 실행되도록 보장하는 래퍼(wrapper) 위젯입니다.
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
@@ -90,9 +158,6 @@ class SleepDetectionHandler extends TaskHandler {
   bool _isServiceRunning = false;
   bool _isDrowsinessDetected = false;
   DateTime? _lastAlertTime;
-  // 설정값
-  static const int _defaultAlertInterval = 3; // 기본 알림 간격(초)
-  static const int _nightAlertInterval = 2; // 야간 알림 간격(초)
 
   /// 서비스가 시작될 때 호출되는 메서드
   /// @param timestamp - 서비스 시작 시간
@@ -124,12 +189,14 @@ class SleepDetectionHandler extends TaskHandler {
     if (!_isServiceRunning) return;
 
     try {
-      final isNightTime = timestamp.hour >= 22 || timestamp.hour <= 5;
+      final isNightTime = timestamp.hour >= AppConstants.nightTimeStartHour ||
+          timestamp.hour <= AppConstants.nightTimeEndHour;
 
       // 졸음이 감지된 경우 알림 발생 여부 체크
       if (_isDrowsinessDetected) {
-        final alertInterval =
-            isNightTime ? _nightAlertInterval : _defaultAlertInterval;
+        final alertInterval = isNightTime
+            ? AppConstants.nightAlertInterval
+            : AppConstants.defaultAlertInterval;
 
         // 마지막 알림으로부터 일정 시간이 지났는지 확인
         if (_lastAlertTime == null ||
@@ -218,8 +285,6 @@ class _FaceDetectorViewState extends State<FaceDetectorView> {
       FaceDetector(options: FaceDetectorOptions(enableClassification: true));
 
   // 졸음 감지 관련 상수 및 변수
-  static const double _closedEyeThreshold = 0.5; // 눈 감김 판단 임계값
-  static const int _drowsinessFrameThreshold = 8; // 졸음 판단을 위한 프레임 수
   int _closedEyeFrameCount = 0; // 눈 감은 프레임 카운터
   bool _canProcess = true; // 이미지 처리 가능 여부
   bool _isBusy = false; // 이미지 처리 중 여부
@@ -227,13 +292,13 @@ class _FaceDetectorViewState extends State<FaceDetectorView> {
   // 오버레이 UI 관련 변수
   OverlayEntry? _overlayEntry; // 화면 위에 표시되는 오버레이
   final _isSleepingNotifier = ValueNotifier<bool>(false); // 졸음 상태 알림
-  static Offset _overlayPosition = const Offset(20, 100); // 오버레이 위치
+  static Offset _overlayPosition =
+      AppConstants.overlayInitialPosition; // 오버레이 위치
   bool _isInitialized = false; // 초기화 완료 여부
 
   // 알람 및 진동 관련 변수
   final AudioPlayer _audioPlayer = AudioPlayer(); // 오디오 플레이어
   bool _isAlarmPlaying = false; // 알람 재생 상태
-  static const int _alertInterval = 3; // 알림 간격(초)
   DateTime? _lastAlertTime; // 마지막 알림 시간
   bool _isVibratingPlaying = false; // 진동 상태
   late double _originalVolume; // 원래 볼륨을 저장할 변수
@@ -319,7 +384,7 @@ class _FaceDetectorViewState extends State<FaceDetectorView> {
         // UI 업데이트 후 오버레이 설정
         // 약간의 지연을 둠으로써 UI가 완전히 빌드된 후 오버레이가 생성되도록 함
         Future.delayed(
-          const Duration(milliseconds: 100),
+          AppConstants.initializationDelay,
           () {
             if (mounted) {
               _overlayEntry?.remove(); // 기존 오버레이 제거
@@ -382,7 +447,7 @@ class _FaceDetectorViewState extends State<FaceDetectorView> {
         await FlutterForegroundTask.openSystemAlertWindowSettings();
         // 사용자가 설정을 변경할 때까지 대기
         while (!await FlutterForegroundTask.canDrawOverlays) {
-          await Future.delayed(const Duration(milliseconds: 500));
+          await Future.delayed(AppConstants.permissionCheckDelay);
         }
       }
 
@@ -390,7 +455,7 @@ class _FaceDetectorViewState extends State<FaceDetectorView> {
       if (!await FlutterForegroundTask.isIgnoringBatteryOptimizations) {
         await FlutterForegroundTask.requestIgnoreBatteryOptimization();
         while (!await FlutterForegroundTask.isIgnoringBatteryOptimizations) {
-          await Future.delayed(const Duration(milliseconds: 500));
+          await Future.delayed(AppConstants.permissionCheckDelay);
         }
       }
 
@@ -439,28 +504,11 @@ class _FaceDetectorViewState extends State<FaceDetectorView> {
             child: ValueListenableBuilder<bool>(
               valueListenable: _isSleepingNotifier,
               builder: (context, isSleeping, _) => Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  // 졸음 감지 상태에 따라 색상 변경
-                  color: isSleeping
-                      ? Colors.red.withOpacity(0.9)
-                      : Colors.blue.withOpacity(0.9),
-                  borderRadius: BorderRadius.circular(20),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withOpacity(0.2),
-                      blurRadius: 4,
-                    ),
-                  ],
-                ),
+                padding: const EdgeInsets.all(AppConstants.overlayPadding),
+                decoration: AppStyles.overlayDecoration(isSleeping),
                 child: Text(
                   isSleeping ? '졸음이 감지됨!' : '졸음 감지중...',
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 14,
-                    fontWeight: FontWeight.bold, // 글자를 더 진하게
-                    decoration: TextDecoration.none,
-                  ),
+                  style: AppStyles.overlayTextStyle,
                 ),
               ),
             ),
@@ -524,22 +572,25 @@ class _FaceDetectorViewState extends State<FaceDetectorView> {
   void _detectDrowsiness(double leftEyeOpenProb, double rightEyeOpenProb) {
     final now = DateTime.now();
     // 야간 시간대(22시 ~ 05시) 여부 확인
-    final isNightTime = now.hour >= 22 || now.hour <= 5;
+    final isNightTime = now.hour >= AppConstants.nightTimeStartHour ||
+        now.hour <= AppConstants.nightTimeEndHour;
 
     // 야간에는 더 민감하게 감지하도록 임계값 조정
-    final threshold =
-        isNightTime ? _closedEyeThreshold * 1.2 : _closedEyeThreshold;
+    final threshold = isNightTime
+        ? AppConstants.closedEyeThreshold * 1.2
+        : AppConstants.closedEyeThreshold;
 
     // 양쪽 눈이 모두 임계값보다 작게 열려있는 경우
     if (leftEyeOpenProb < threshold && rightEyeOpenProb < threshold) {
       _closedEyeFrameCount++;
 
       // 연속된 프레임 동안 눈을 감고 있는 경우
-      if (_closedEyeFrameCount >= _drowsinessFrameThreshold) {
+      if (_closedEyeFrameCount >= AppConstants.drowsinessFrameThreshold) {
         _showOverlay(true); // 서비스에 상태 업데이트
         // 마지막 알림으로부터 일정 시간이 지난 경우에만 알림 발생
         if (_lastAlertTime == null ||
-            now.difference(_lastAlertTime!).inSeconds >= _alertInterval) {
+            now.difference(_lastAlertTime!).inSeconds >=
+                AppConstants.defaultAlertInterval) {
           _triggerAlert(isNightTime);
           _lastAlertTime = now;
         }
@@ -570,11 +621,13 @@ class _FaceDetectorViewState extends State<FaceDetectorView> {
       });
 
       // 야간에는 더 큰 볼륨으로 알림
-      final volume = isNightTime ? 1.0 : 0.7;
+      final volume = isNightTime
+          ? AppConstants.nightTimeVolume
+          : AppConstants.dayTimeVolume;
       VolumeController().setVolume(volume, showSystemUI: false);
 
       // 볼륨 설정이 적용되도록 짧은 딜레이 추가
-      await Future.delayed(const Duration(milliseconds: 100));
+      await Future.delayed(AppConstants.volumeChangeDelay);
 
       // 알람과 진동 시작
       await _triggerAlarm();
@@ -598,7 +651,7 @@ class _FaceDetectorViewState extends State<FaceDetectorView> {
       while (_isVibratingPlaying) {
         await Haptics.vibrate(HapticsType.heavy);
         // 진동 간격 설정
-        await Future.delayed(const Duration(milliseconds: 100));
+        await Future.delayed(AppConstants.vibrationInterval);
       }
     }
   }
@@ -639,7 +692,7 @@ class _FaceDetectorViewState extends State<FaceDetectorView> {
         VolumeController().setVolume(_originalVolume, showSystemUI: false);
 
         // 볼륨 설정이 적용되도록 짧은 딜레이 추가
-        await Future.delayed(const Duration(milliseconds: 100));
+        await Future.delayed(AppConstants.volumeChangeDelay);
       } catch (e) {
         debugPrint('알람 중지 에러: $e');
       }
@@ -747,7 +800,7 @@ class _CameraViewState extends State<CameraView> {
       final camera = _cameras[_cameraIndex];
       _controller = CameraController(
         camera,
-        ResolutionPreset.low, // 저해상도 설정으로 성능 최적화
+        AppConstants.cameraResolution, // 저해상도 설정으로 성능 최적화
         enableAudio: false, // 오디오 비활성화
         imageFormatGroup: Platform.isAndroid
             ? ImageFormatGroup.nv21 // 안드로이드용 이미지 포맷
